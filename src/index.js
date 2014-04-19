@@ -1,0 +1,1 @@
+var sentai = require('sentai');
