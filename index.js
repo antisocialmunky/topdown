@@ -45,7 +45,7 @@ this.use = function(routes) {
 this.use(config);
 
 app.use('/app.js', require('requisite').middleware({
-  entry: __dirname + '/src/index.js'
+  entry: __dirname + '/lib/main-loop.js'
 }));
 
 app.listen(process.env.PORT || 8080);

@@ -15,8 +15,9 @@
     "express": "^4.0.0",
     "executive": "^0.4.7",
     "mersennetwister": "^0.1.1",
-    "duckling": "0.0.1",
-    "sentai": "0.0.10",
-    "menagerie": "0.0.3"
+    "duckling": "^0.0.1",
+    "sentai": "^0.0.12",
+    "menagerie": "^0.0.3",
+    "jquery": "^2.1.0"
   }
 }

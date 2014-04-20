@@ -2,11 +2,10 @@ exec = require('executive').interactive
 
 task 'build', 'compile src/*.coffee to lib/*.js', ->
   exec 'node_modules/.bin/coffee -bcm -o lib/ src/'
-  exec 'node_modules/.bin/coffee -bcm -o .test test/'
 
 task 'watch', 'watch for changes and recompile project', ->
   exec 'node_modules/.bin/coffee -bcmw -o lib/ src/'
-  exec 'node_modules/.bin/coffee -bcmw -o .test test/'
+  exec 'node .'
 
 task 'test', 'Run tests', ->
   exec [
