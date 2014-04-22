@@ -16,7 +16,7 @@
     "executive": "^0.4.7",
     "mersennetwister": "^0.1.1",
     "duckling": "^0.0.1",
-    "sentai": "^0.0.12",
+    "sentai": "^0.0.17",
     "menagerie": "^0.0.3",
     "jquery": "^2.1.0"
   }

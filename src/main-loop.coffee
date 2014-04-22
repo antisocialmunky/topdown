@@ -2,7 +2,7 @@ $ = require 'jquery'
 Game = require './game'
 #Utils = require './utils'
 
-$(document ).ready(()->
+$(document).ready(()->
   #loader = new PIXI.AssetLoader([], false)
   #loader.onComplete = ()->
   #create an new instance of a pixi stage
