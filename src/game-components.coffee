@@ -1,8 +1,12 @@
 Sentai = require 'sentai'
-Vector2D = require './c_vector2d'
-Rectangle = require('menagerie')
+Menagerie = require 'menagerie'
+ADT = Menagerie.ADT
+Collidable = Menagerie.Collider.Collidable
 
-rgb = require('./c_utils').rgb
+Vector2D = ADT.Vector2D
+Bounds = ADT.Bounds
+
+rgb = require('./utils').rgb
 
 FLOOR = Math.floor
 ROUND = Math.round
@@ -10,24 +14,32 @@ SQRT = Math.sqrt
 
 Sentai.componentize(class GameFunctions
   game: null
+  removed: false
   constructor: (options)->
     @game = options.game
     @game.add(@_entity)
   addSprite: (sprite)->
     @game.addChild(sprite)
   remove: ()->
-    @game.remove(@_entity))
+    if !@removed
+      @game.remove(@_entity)
+      @removed = true)
 .observes(addSprite: 'sprite')
 .listensTo('remove')
 
 Sentai.componentize(class StaticObject
   position: null
+  map: null
   constructor: (options)->
-    @position = new Vector2D
+    @map = options.map
+    @setPosition(new Vector2D
       x: options.x
-      y: options.y
+      y: options.y)
   setPosition: (position)->
-    @position = position)
+    @position = position
+    #if @map?
+      #@map.add(@_entity)
+    )
 .sync('position')
 
 Sentai.componentize(class MovingObject extends StaticObject
@@ -45,37 +57,91 @@ Sentai.componentize(class MovingObject extends StaticObject
   setVelocity: 'velocity')
 .listensTo('tick')
 
-class DecisionMaker
-  think: ()->
-
-Sentai.componentize(class CollisionBody
-  radius: 0
-  position: null
-  constructor: (options)->
-    @radius = options.radius || @radius
-  checkForCollision: (entity)->
-    @collide(entity) if entity.radius? && entity.position? && @position.sub(entity.position).length() <= @radius + entity.radius
-  collide: ()->
-  setPosition: (position)->
-    @position = position)
-.sync('radius')          
-.observes(setPosition: 'position')
-
-Sentai.componentize(class Bullet extends CollisionBody
-  filter: null
+Sentai.componentize(class Body extends Collidable
   game: null
   constructor: (options)->
     @game = options.game
-    @filter = options.filter
+    @collider = options.collider
     super
-  tick: ()->
-    for entity in @game.entityList
-      if @filter(entity)
-        @checkForCollision(entity)
-  collide: (entity)->
-    @_entity.remove()
-    entity.remove())
-.listensTo('tick')
+    @collider.add(@)
+  setPosition: (position)->
+    @position = position
+  collide: ()->
+  remove: ()->
+    @game.removeBody(@))
+.sync('bounds')
+.observes(setPosition: 'position')
+.listensTo('collide', 'remove')
+
+Sentai.componentize(class FriendlyBullet extends Body
+  constructor: (options)->
+    super
+      layer: 'friendly-bullet'
+      layersToCollide: ['enemy']
+      bounds: new Bounds
+        radius: options.radius
+      game: options.game
+      collider: options.collider
+  collide: (object1, object2)->
+    object1.remove()
+    object2.remove())
+
+Sentai.componentize(class FriendlyBody extends Body
+  constructor: (options)->
+    super
+      layer: 'friendly'
+      bounds: new Bounds
+        radius: options.radius
+      game: options.game
+      collider: options.collider)
+
+Sentai.componentize(class EnemyBody extends Body
+  constructor: (options)->
+    super
+      layer: 'enemy'
+      bounds: new Bounds
+        radius: options.radius
+      game: options.game
+      collider: options.collider)
+
+Sentai.componentize(class Range extends Body
+  rangeColor: rgb(255,0,0)
+  rangeRadius: 100
+  rangeSprite: null
+  targets: null
+  constructor: (options, collidableOptions)->
+    @rangeRadius = options.rangeRadius || @rangeRadius
+    
+    @targets = []
+    rangeSprite = @rangeSprite = new PIXI.Graphics()
+    
+    rangeSprite.lineStyle(1, @rangeColor)
+    rangeSprite.drawCircle(0, 0, @rangeRadius)
+
+    collidableOptions.bounds = new Bounds
+      radius: @rangeRadius
+    super(collidableOptions)
+  setSprite: (sprite)->
+    sprite.addChild(@rangeSprite)
+  think: ()->
+    @targets = []
+  collide: (object1, object2)->
+    @targets.push(object2))
+.sync('rangeRadius', 'targets')
+.observes(setSprite: 'sprite')
+.listensTo('think')
+
+Sentai.componentize(class FriendlyRange extends Range
+  constructor: (options)->
+    super(options,
+      layer: 'friendly-range'
+      layersToCollide: ['enemy']
+      game: options.game
+      collider: options.collider))
+
+Sentai.componentize(class DecisionMaker
+  think: ()->)
+.listensTo('think')
 
 Sentai.componentize(class MoveRightAtConstantSpeed extends DecisionMaker
   speed: 2
@@ -88,22 +154,21 @@ Sentai.componentize(class MoveRightAtConstantSpeed extends DecisionMaker
   setVelocity: (velocity)->
     @velocity = velocity)
 .observes(setVelocity: 'velocity')
-.listensTo('think')
 
-Sentai.componentize(class ShootsTarget extends DecisionMaker
+Sentai.componentize(class ShootsTarget
   BulletClass: null
+  collider: null
   position: null
   game: null
   targets: null
   cooldown: 1000
   cooldownCounter: 0
-  filter: null
   bulletSpeed: 1000
   constructor: (options)->
     @BulletClass = options.BulletClass
     @game = options.game
-    @filter = options.filter
     @bulletSpeed = options.bulletSpeed || @bulletSpeed
+    @collider = options.collider
   setPosition: (position)->
     @position = position
   setTargets: (targets)->
@@ -119,7 +184,7 @@ Sentai.componentize(class ShootsTarget extends DecisionMaker
           y: position.y
           velocity: target.position.sub(position).normalize().multiplyByScalar(@bulletSpeed)
           radius: 4
-          filter: @filter
+          collider: @collider
           game: @game)
         @cooldownCounter = 1000
     else
@@ -171,40 +236,6 @@ class GraphicalPlaceholder extends Sprite
 
     super(sprite: sprite)
 
-Sentai.componentize(class Range
-  rangeColor: rgb(255,0,0)
-  rangeRadius: 100
-  rangeSprite: null
-  targets: null
-  game: null
-  filter: null
-  constructor: (options)->
-    @game = options.game
-    @filter = options.filter
-    @rangeColor = options.rangeColor || @rangeColor
-    @rangeRadius = options.rangeRadius || @rangeRadius
-    @targets = []
-    rangeSprite = @rangeSprite = new PIXI.Graphics()
-    
-    rangeSprite.lineStyle(1, @rangeColor)
-    rangeSprite.drawCircle(0, 0, @rangeRadius)
-  setSprite: (sprite)->
-    sprite.addChild(@rangeSprite)
-  tick: ()->
-    if @filter?
-      @targets.length = 0
-      myEntity = @_entity
-      for entity in @game.entityList
-        if entity != myEntity && entity.position? && @filter(entity)
-          x = myEntity.position.x - entity.position.x
-          y = myEntity.position.y - entity.position.y
-          dist = SQRT(x * x + y * y)
-          if dist <= @rangeRadius
-            @targets.push(entity))
-.sync('rangeRadius', 'targets')
-.observes(setSprite: 'sprite')
-.listensTo('tick')
-
 module.exports = 
   GameFunctions: GameFunctions
   StaticObject: StaticObject
@@ -212,7 +243,10 @@ module.exports =
   KillWhenNotVisible: KillWhenNotVisible
   MoveRightAtConstantSpeed: MoveRightAtConstantSpeed
   GraphicalPlaceholder: GraphicalPlaceholder
-  Range: Range
-  CollisionBody: CollisionBody
-  Bullet: Bullet
+  Ranges:
+    FriendlyRange: FriendlyRange
+  Bodies:
+    FriendlyBullet: FriendlyBullet
+    FriendlyBody: FriendlyBody
+    EnemyBody: EnemyBody
   ShootsTarget: ShootsTarget

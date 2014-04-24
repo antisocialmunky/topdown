@@ -1,26 +1,26 @@
 Sentai = require 'sentai'
 Components = require './game-components'
 
-Placeholder = Sentai.entity(
+class Placeholder extends Sentai.entity(
   Components.GameFunctions
-  Components.CollisionBody
   Components.MovingObject
+  Components.Bodies.EnemyBody
   Components.KillWhenNotVisible
   Components.MoveRightAtConstantSpeed
   Components.GraphicalPlaceholder)
 
-PlaceholderTower = Sentai.entity(
+class PlaceholderTower extends Sentai.entity(
   Components.GameFunctions
-  Components.CollisionBody
   Components.StaticObject
-  Components.Range
+  Components.Bodies.FriendlyBody
+  Components.Ranges.FriendlyRange
   Components.ShootsTarget
   Components.GraphicalPlaceholder)
 
-PlaceholderBullet = Sentai.entity(
+class PlaceholderBullet extends Sentai.entity(
   Components.GameFunctions
-  Components.Bullet
   Components.MovingObject
+  Components.Bodies.FriendlyBullet
   Components.KillWhenNotVisible
   Components.GraphicalPlaceholder)
 
