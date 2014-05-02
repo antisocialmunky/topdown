@@ -3,15 +3,15 @@ Components = require './game-components'
 
 class Placeholder extends Sentai.entity(
   Components.GameFunctions
-  Components.MovingObject
+  Components.MovingTileObject
   Components.Bodies.EnemyBody
   Components.KillWhenNotVisible
-  Components.MoveRightAtConstantSpeed
+  Components.MovesAroundRandomly
   Components.GraphicalPlaceholder)
 
 class PlaceholderTower extends Sentai.entity(
   Components.GameFunctions
-  Components.StaticObject
+  Components.StaticTileObject
   Components.Bodies.FriendlyBody
   Components.Ranges.FriendlyRange
   Components.ShootsTarget

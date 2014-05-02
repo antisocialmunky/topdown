@@ -25,10 +25,17 @@ class CircleCollider extends Collider
         return true
     return false
 
+cost = (tile) -> 
+  if tile.length > 0
+    return false
+  return 1
+
 # Extend stage to be more gamey
 module.exports = class Game extends PIXI.DisplayObjectContainer
   renderer: null
-  lastTime: 0
+  lastRenderTime: 0
+  lastUpdateTime: 0
+  updatePeriod: 100 #in ms
   entityList: null
   entityCountText: 0
   entityRemovalQueue: null
@@ -37,6 +44,7 @@ module.exports = class Game extends PIXI.DisplayObjectContainer
   height: 768
   gameOverScreen: null
   map: null
+  pathingQueue: null
   collider: null
   constructor: (bgColor)->
     super
@@ -64,12 +72,12 @@ module.exports = class Game extends PIXI.DisplayObjectContainer
     #add the renderer view element to the DOM
     document.body.appendChild(@renderer.view)
 
-    @render = () =>
-      @update()
+    @startRendering = () =>
+      @render()
       #render the stage
       @renderer.render(stage)
       #schedule the next render
-      requestAnimFrame(@render)
+      requestAnimFrame(@startRendering)
     
     stage.addChild(@)
 
@@ -82,25 +90,42 @@ module.exports = class Game extends PIXI.DisplayObjectContainer
       tileWidth: 40
       tileHeight: 24)
 
+    @pathingQueue = new Menagerie.TileMap.PathingQueue
+      algorithm: Menagerie.TileMap.AStar
+      cost: cost
     @collider = new CircleCollider
 
   start: ()->
-    @lastTime = new Date().getTime()
+    @lastRenderTime = new Date().getTime()
+    @lastUpdateTime = @lastRenderTime
 
     setInterval(()=>
-      new GameObjects.Placeholder(
-        x: 1
-        y: ROUND(RANDOM()*@height)
-        radius: 10
-        speed: 100
-        game: @
-        map: @map
-        collider: @collider)
-    , 200)
+      tile = @map.get(1, RANDOM() * @height)
+      center = tile.center
+
+      create = true
+      if tile.length > 0
+        create = false
+
+      if create
+        new GameObjects.Placeholder(
+          x: center.x
+          y: center.y
+          radius: 10
+          speed: 40
+          game: @
+          map: @map
+          collider: @collider
+          pathingQueue: @pathingQueue)
+    , 100)
 
     @setupEntityCounter()
 
-    @render()
+    @startRendering()
+    setInterval(()=>
+      @update()
+    , @updatePeriod)
+
   setupEntityCounter: ()->
     @entityCountText = new PIXI.Text(0, 
       font: "bold 24px Podkova"
@@ -112,19 +137,13 @@ module.exports = class Game extends PIXI.DisplayObjectContainer
     @entityCountText.y = 20
     @addChild(@entityCountText)
 
-  update: ()->
+  render: ()->
     stats.begin()
     @entityCountText.setText(@entityList.length)
 
     newTime = new Date().getTime()
-    dt = newTime - @lastTime
-    @lastTime = newTime
-
-    width = @width
-    height = @height
-
-    for entity in @entityList
-      if entity.think? then entity.think()
+    dt = newTime - @lastRenderTime
+    @lastRenderTime = newTime
     
     @collider.collide()
 
@@ -134,6 +153,18 @@ module.exports = class Game extends PIXI.DisplayObjectContainer
     @performRemove()
 
     stats.end()
+
+  update: ()->
+    newTime = new Date().getTime()
+    dt = newTime - @lastUpdateTime
+    @lastUpdateTime = newTime
+
+    for entity in @entityList
+      if entity.think? then entity.think(dt)
+      if entity.clean? then entity.clean()
+
+    for i in [1..3]
+      @pathingQueue.path()
   
   add: (entity)->
     @entityList.push(entity)
@@ -161,28 +192,25 @@ module.exports = class Game extends PIXI.DisplayObjectContainer
     bodyRemovalQueue.length = 0
     
   click: (event) ->
-    x = event.global.x / @scale.x
-    y = event.global.y / @scale.y
-
-    x = (FLOOR(x / @map.pixelWidth) + 0.5) * @map.pixelWidth
-    y = (FLOOR(y / @map.pixelHeight) + 0.5) * @map.pixelHeight
+    center = @map.get(event.global.x / @scale.x, event.global.y / @scale.y).center
 
     if @map.filter(
       (element)->
         return element instanceof GameObjects.PlaceholderTower
-      , x, y).length == 0
+      , center.x, center.y).length == 0
 
       new GameObjects.PlaceholderTower(
         color: rgb(128,255,128)
-        x: ROUND(x)
-        y: ROUND(y)
+        x: ROUND(center.x)
+        y: ROUND(center.y)
         radius: 16
         game: @
         map: @map
         collider: @collider
+        pathingQueue: @pathingQueue
         BulletClass: GameObjects.PlaceholderBullet)
   
   tap: (event) ->
     @click.apply(@, arguments)
 
-  render: ()->
+  startRendering: ()->
