@@ -15,27 +15,40 @@ SQRT = Math.sqrt
 MIN = Math.min
 RANDOM = Math.random
 
+DEBUG = false
+
 Sentai.componentize(class GameFunctions
   game: null
+  sprite: null
   removed: false
   constructor: (options)->
     @game = options.game
     @game.add(@_entity)
-  addSprite: (sprite)->
-    @game.addChild(sprite)
   remove: ()->
     if !@removed
       @game.remove(@_entity)
       @removed = true)
-.observes(addSprite: 'sprite')
 .listensTo('remove')
+
+Sentai.componentize(class Health
+  health: 100
+  constructor: (options)->
+    @health = options.health || @health
+  damage: (damage)->
+    @health -= damage
+    if @health <= 0
+      @_entity.remove())
+.sync('health')
+.listensTo('damage')
 
 Sentai.componentize(class StaticObject
   position: null
+  type: null
   constructor: (options)->
     @position = new Vector2D
       x: options.x
-      y: options.y)
+      y: options.y
+    @type = options.type)
 .sync('position')
 
 Sentai.componentize(class MovingObject extends StaticObject
@@ -62,16 +75,18 @@ Sentai.componentize(class StaticTileObject extends StaticObject
   constructor: (options)->
     super
     @map = options.map
-    @map.add(@_entity)
+    @map.add(@_entity, @type)
+
     @tile = @_entity._tile
-  remove: ()->
-    @tile.remove(@_entity))
+  destroy: ()->
+    @map.remove(@_entity))
 .sync('tile')
-.listensTo('remove')
+.listensTo('destroy')
  
 TILE_MOVING_STATES = 
   WAITING: 0
   INTERPOLATING: 1
+  DELAY: 2
 
 Sentai.componentize(class MovingTileObject extends StaticTileObject
   waypoints: null
@@ -79,6 +94,7 @@ Sentai.componentize(class MovingTileObject extends StaticTileObject
   velocity: new Vector2D
   state: TILE_MOVING_STATES.WAITING
   remainingDt: 0
+  delayDt: 0
   constructor: (options)->
     super
     @waypoints = []
@@ -88,28 +104,36 @@ Sentai.componentize(class MovingTileObject extends StaticTileObject
       when TILE_MOVING_STATES.WAITING
         if @waypoints[0]?
           target = @waypoints[0]
-          repath = false
-          if target.length > 0
-            repath = true
-          if repath
-            @_entity.resetPath()
-          else
-            @waypoints.shift();
-            velocity = target.center.sub(@tile.center)
-            distance = velocity.length()
-            @remainingDt = distance / @speed * 1000
-            @velocity = velocity.normalize().multiplyByScalar(@speed / 1000)
-            @state = TILE_MOVING_STATES.INTERPOLATING
+          #repath = false
+          #if target.length > 0
+            #repath = true
+          #if repath
+            #@_entity.resetPath()
+          #else
+          @waypoints.shift();
+          velocity = target.center.sub(@tile.center)
+          distance = velocity.length()
+          @remainingDt = distance / @speed * 1000
+          @velocity = velocity.normalize().multiplyByScalar(@speed / 1000)
+          @state = TILE_MOVING_STATES.INTERPOLATING
 
-            #we want to reserve the space this goes into to prevent others from doing so
-            target.add(@_entity)
-            @tile = target
+          #we want to reserve the space this goes into to prevent others from doing so
+          target.add(@_entity, @type)
+          @tile = target
       when TILE_MOVING_STATES.INTERPOLATING
         nextDt = MIN(@remainingDt, dt)
         @remainingDt -= dt
-        @position = @position.add(@velocity.multiplyByScalar(nextDt))
+        if nextDt > 0
+          @position = @position.add(@velocity.multiplyByScalar(nextDt))
         if @remainingDt <= 0
           @state = TILE_MOVING_STATES.WAITING
+      when TILE_MOVING_STATES.DELAY
+        @delayDt -= dt
+        if @delayDt < 0
+          @state = TILE_MOVING_STATES.INTERPOLATING
+  stopMoving: (ms)->
+    @delayDt = ms
+    @state = TILE_MOVING_STATES.DELAY
   setWaypoints: (waypoints)->
     @waypoints = waypoints
   setPosition: (position)->
@@ -118,7 +142,7 @@ Sentai.componentize(class MovingTileObject extends StaticTileObject
 .observes(
   setWaypoints: 'waypoints'
   setPosition: 'position')
-.listensTo('tick')
+.listensTo('tick', 'stopMoving')
 
 Sentai.componentize(class Body extends Collidable
   game: null
@@ -130,14 +154,17 @@ Sentai.componentize(class Body extends Collidable
   setPosition: (position)->
     @position = position
   collide: ()->
-  remove: ()->
+  destroy: ()->
     @game.removeBody(@))
 .sync('bounds')
 .observes(setPosition: 'position')
-.listensTo('collide', 'remove')
+.listensTo('collide', 'destroy')
 
 Sentai.componentize(class FriendlyBullet extends Body
+  collided: false
+  bulletDamage: 100
   constructor: (options)->
+    @bulletDamage = options.bulletDamage || @bulletDamage
     super
       layer: 'friendly-bullet'
       layersToCollide: ['enemy']
@@ -146,8 +173,10 @@ Sentai.componentize(class FriendlyBullet extends Body
       game: options.game
       collider: options.collider
   collide: (object1, object2)->
-    object1.remove()
-    object2.remove())
+    if !@collided
+      object1.remove()
+      object2.damage(@bulletDamage)
+      @collided = true)
 
 Sentai.componentize(class FriendlyBody extends Body
   constructor: (options)->
@@ -166,6 +195,31 @@ Sentai.componentize(class EnemyBody extends Body
         radius: options.radius
       game: options.game
       collider: options.collider)
+
+Sentai.componentize(class EnemyMelee extends Body
+  meleeDamage: 10
+  meleeRate: 100
+  meleeCooldown: 0
+  meleePause: 200
+  constructor: (options)->
+    @meleeDamage = options.meleeDamage || @meleeDamage
+    super
+      layer: 'enemy'
+      layersToCollide: ['friendly']
+      bounds: new Bounds
+        radius: options.radius
+      game: options.game
+      collider: options.collider
+  collide: (object1, object2)->
+    if @meleeCooldown <= 0
+      object2.damage(@meleeDamage) if object2.damage?
+      @meleeCooldown = @meleeRate
+
+    object1.stopMoving(@meleePause) if object1.stopMoving?
+  tick: (dt)->
+    if @meleeCooldown > 0
+      @meleeCooldown -= dt)
+.listensTo('tick')
 
 Sentai.componentize(class Range extends Body
   rangeColor: rgb(255,0,0)
@@ -206,6 +260,7 @@ Sentai.componentize(class DecisionMaker
   think: (dt)->) #lives on the thinking loop rather than the rendering one
 .listensTo('think')
 
+adds = 0
 Sentai.componentize(class MovesAroundRandomly extends DecisionMaker
   waypoints: null
   start: null
@@ -215,6 +270,7 @@ Sentai.componentize(class MovesAroundRandomly extends DecisionMaker
   reset: false
   scheduled: false
   pathingQueue: null
+  removed: false
   constructor: (options)->
     super
     @game = options.game
@@ -222,31 +278,41 @@ Sentai.componentize(class MovesAroundRandomly extends DecisionMaker
     @pathingQueue = options.pathingQueue
     @waypoints = []
   think: ()->
+    #do not thing if removing
     if @reset
       @findPath()
     else if @start? && @waypoints.length == 0
-      @end = @map.get(@map.totalPixelWidth - 1, RANDOM() * @map.totalPixelHeight)
+      enemyTargets = @game.enemyTargets
+      if enemyTargets.length > 0
+        @end = enemyTargets[FLOOR(RANDOM() * enemyTargets.length)].tile
+      else
+        @end = @map.get(@map.totalPixelWidth - 1, RANDOM() * @map.totalPixelHeight)
       if @end != @start
         @findPath()
   findPath: ()->
     if !@scheduled
-      that = @
-      @pathingQueue.schedule(@_entity, @end, (waypoints)->
-        if waypoints.length > 0
-          sprite = that.sprite = new PIXI.Graphics()
-          sprite.lineStyle(2, rgb(0,255,0), 0.5)
-          sprite.moveTo(waypoints[0].center.x, waypoints[0].center.y)
-          for waypoint in waypoints 
-            sprite.lineTo(waypoint.center.x, waypoint.center.y)
-          that.game.addChild(sprite)
-          that.reset = false
-          that.waypoints = waypoints
-        if that.end.length > 0
-          that.end = that.map.get(that.map.totalPixelWidth - 1, RANDOM() * that.map.totalPixelHeight)
-          that.resetPath()
-        that.scheduled = false)
+      @pathingQueue.schedule(@_entity, @end, (waypoints)=>
+        #do not path if removing
+        if waypoints.length > 0 && !@removed
+          if DEBUG
+            @removeSprite()
+            sprite = @sprite = new PIXI.Graphics()
+            sprite.lineStyle(2, rgb(0,255,0), 0.1)
+            sprite.moveTo(waypoints[0].center.x, waypoints[0].center.y)
+            for waypoint in waypoints 
+              sprite.lineTo(waypoint.center.x, waypoint.center.y)
+            @game.addChild(sprite)
+          @reset = false
+          @waypoints = waypoints
+        if @end.length > 0
+          enemyTargets = @game.enemyTargets
+          if enemyTargets.length > 0
+            @end = enemyTargets[FLOOR(RANDOM() * enemyTargets.length)].tile
+          else
+            @end = @map.get(RANDOM() * @map.totalPixelWidth, RANDOM() * @map.totalPixelHeight)
+          @resetPath()
+        @scheduled = false)
       @scheduled = true
-      @remove()
   resetPath: ()->
     @reset = true
 #    if @waypoints.length > 1
@@ -256,15 +322,19 @@ Sentai.componentize(class MovesAroundRandomly extends DecisionMaker
 #        waypoints.shift()
 #        waypoints.shift()
 #        @waypoints = waypoints.concat(@waypoints)
-  remove: ()->
-    if @sprite?
-      @game.removeChild(@sprite)
-      @sprite = null
+  removeSprite: ()->
+    if DEBUG 
+      if @sprite?
+        @game.removeChild(@sprite)
+        @sprite = null
+  destroy: ()->
+    @removed = true
+    @removeSprite()
   setTile: (tile)->
     @start = tile)
 .sync('waypoints')
 .observes(setTile: 'tile')
-.listensTo('remove', 'resetPath')
+.listensTo('destroy', 'resetPath')
 
 Sentai.componentize(class ShootsTarget extends DecisionMaker
   BulletClass: null
@@ -276,11 +346,13 @@ Sentai.componentize(class ShootsTarget extends DecisionMaker
   cooldown: 1000
   cooldownCounter: 0
   bulletSpeed: 500
+  bulletDamage: 100
   constructor: (options)->
     @BulletClass = options.BulletClass
     @map = options.map
     @game = options.game
     @bulletSpeed = options.bulletSpeed || @bulletSpeed
+    @bulletDamage = options.bulletDamage || @bulletDamage
     @collider = options.collider
   setPosition: (position)->
     @position = position
@@ -297,6 +369,7 @@ Sentai.componentize(class ShootsTarget extends DecisionMaker
           y: position.y
           velocity: target.position.sub(position).normalize().multiplyByScalar(@bulletSpeed)
           radius: 4
+          bulletDamage: @bulletDamage
           map: @map
           collider: @collider
           game: @game)
@@ -323,17 +396,21 @@ Sentai.componentize(class KillWhenNotVisible
 
 # Sprite continuously syncs to a position
 Sentai.componentize(class Sprite
-  sprite:
-    x: 0
-    y: 0
+  sprite: new PIXI.Graphics
+  game: null
   constructor: (options)->
     @sprite = options.sprite || @sprite
+    @game = options.game
+    @game.addChild(@sprite)
   setPosition: (position)->
     if @sprite?
       @sprite.x = FLOOR(position.x)
-      @sprite.y = FLOOR(position.y))
+      @sprite.y = FLOOR(position.y)
+  destroy: ()->
+    @game.removeChild(@sprite) if @sprite)
 .sync('sprite')
 .observes(setPosition: 'position')
+.listensTo('destroy')
 
 class GraphicalPlaceholder extends Sprite
   color: rgb(255,255,255)
@@ -349,21 +426,60 @@ class GraphicalPlaceholder extends Sprite
     #end the fill
     sprite.endFill()
 
-    super(sprite: sprite)
+    options.sprite = sprite
+    super
+
+class TowerPlaceholder extends Sprite
+  color: rgb(255,255,255)
+  radius: 10
+  constructor: (options)->
+    @color = options.color || @color
+    @radius = options.radius || @radius
+    sprite = new PIXI.Sprite.fromImage('./assets/TowerSprite.png')
+    sprite.anchor.x = 0.5
+    sprite.anchor.y = 0.875
+    
+    options.sprite = sprite
+    super
+
+class WallPlaceholder extends Sprite
+  color: rgb(100,130,130)
+  radius: 10
+  constructor: (options)->
+    @color = options.color || @color
+    radius = @radius = options.radius || @radius
+    diameter = radius * 2
+    sprite = new PIXI.Graphics()
+    
+    sprite.beginFill(@color)
+    sprite.drawRect(-radius, -radius, diameter, diameter)
+
+    #end the fill
+    sprite.endFill()
+
+    options.sprite = sprite
+    super
 
 module.exports = 
+  Health: Health
   GameFunctions: GameFunctions
-  StaticObject: StaticObject
-  MovingObject: MovingObject
-  StaticTileObject: StaticTileObject
-  MovingTileObject: MovingTileObject
-  KillWhenNotVisible: KillWhenNotVisible
-  MovesAroundRandomly: MovesAroundRandomly
-  GraphicalPlaceholder: GraphicalPlaceholder
-  Ranges:
-    FriendlyRange: FriendlyRange
-  Bodies:
+  Collision:
     FriendlyBullet: FriendlyBullet
     FriendlyBody: FriendlyBody
     EnemyBody: EnemyBody
-  ShootsTarget: ShootsTarget
+    EnemyMelee: EnemyMelee
+  Motion:
+    StaticObject: StaticObject
+    MovingObject: MovingObject
+    StaticTileObject: StaticTileObject
+    MovingTileObject: MovingTileObject
+  Graphics:
+    GraphicalPlaceholder: GraphicalPlaceholder
+    TowerPlaceholder: TowerPlaceholder
+    WallPlaceholder: WallPlaceholder
+  Behaviors:
+    KillWhenNotVisible: KillWhenNotVisible
+    MovesAroundRandomly: MovesAroundRandomly
+    ShootsTarget: ShootsTarget
+  Ranges:
+    FriendlyRange: FriendlyRange
